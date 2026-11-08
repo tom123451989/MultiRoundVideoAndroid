@@ -428,7 +428,7 @@ internal suspend fun processVideo(
         if (!inputFile.exists() || inputFile.length() == 0L) throw IOException("Selected video is empty or could not be copied.")
         if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
 
-        // Probe original video duration and file size
+        // Probe original video duration and file size once
         val retriever = MediaMetadataRetriever()
         var originalDurationSec = 0.0
         val originalSizeBytes = inputFile.length()
@@ -739,7 +739,14 @@ private fun buildSpeedCommand(
     intelliTargetBitrate: String? = null
 ): List<String> {
     val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
-    val args = mutableListOf("-y", "-i", input.absolutePath, "-filter:v", vf)
+    val args = mutableListOf(
+        "-y",
+        "-flags", "+low_delay",
+        "-fflags", "+nobuffer",
+        "-fps_mode", "passthrough",
+        "-i", input.absolutePath,
+        "-filter:v", vf
+    )
     if (includeAudio && audioFilter != null) {
         args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest"))
     } else {
@@ -757,7 +764,14 @@ private fun buildConcatCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val args = mutableListOf("-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath, "-c:v", "copy")
+    val args = mutableListOf(
+        "-y",
+        "-fflags", "+nobuffer",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", listFile.absolutePath,
+        "-c:v", "copy"
+    )
     if (includeAudio) {
         args.addAll(listOf("-c:a", "copy"))
     } else {
@@ -768,7 +782,6 @@ private fun buildConcatCommand(
 }
 
 private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String? = null): List<String> {
-    val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1).toString()
     val bitrate = intelliTargetBitrate ?: "1500k"
     return when (encoder) {
         "h264_mediacodec" -> listOf(
@@ -779,19 +792,20 @@ private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String?
         "mpeg4" -> if (intelliTargetBitrate != null) listOf(
             "-c:v", "mpeg4",
             "-b:v", bitrate,
-            "-threads", cores
+            "-threads", "0"
         ) else listOf(
             "-c:v", "mpeg4",
             "-q:v", "5",
-            "-threads", cores
+            "-threads", "0"
         )
         "libopenh264" -> listOf(
             "-c:v", "libopenh264",
             "-b:v", bitrate,
             "-preset", "ultrafast",
-            "-threads", cores
+            "-tune", "zerolatency",
+            "-threads", "0"
         )
-        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-threads", cores)
+        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-preset", "ultrafast", "-threads", "0")
     }
 }
 
