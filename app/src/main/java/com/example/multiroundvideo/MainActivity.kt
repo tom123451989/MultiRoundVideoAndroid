@@ -482,7 +482,10 @@ internal suspend fun processVideo(
                     speed
                 }
 
-                val audioFilter = if (includeAudio) buildAtempoFilter(effectiveRoundSpeed, audioBoost) else null
+                // Process audio on the final round to avoid accumulating AAC header corruptions in intermediate steps
+                val isFinalRound = (round == repeats)
+                val shouldProcessAudio = includeAudio && isFinalRound
+                val audioFilter = if (shouldProcessAudio) buildAtempoFilter(effectiveRoundSpeed, audioBoost) else null
 
                 val roundSpeedLabel = if (intelliEnabled) {
                     "Intelli speed ${String.format(Locale.US, "%.1fx", effectiveRoundSpeed)} (joins: $joins untouched)…"
@@ -496,7 +499,7 @@ internal suspend fun processVideo(
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, effectiveRoundSpeed, audioFilter, includeAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, effectiveRoundSpeed, audioFilter, shouldProcessAudio, encoder, intelliTargetBitrate) },
                     onFallback = { fallbackMessage -> update(roundStartProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
@@ -530,7 +533,7 @@ internal suspend fun processVideo(
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, includeAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, shouldProcessAudio, encoder, intelliTargetBitrate) },
                     onFallback = { fallbackMessage -> update(roundMidProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
@@ -743,11 +746,13 @@ private fun buildSpeedCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
+    val vf = if (encoder == "h264_mediacodec") "fps=30,setpts=N/(30*TB),format=nv12" else "fps=30,setpts=N/(30*TB)"
     val args = mutableListOf(
         "-y",
+        "-fflags", "+genpts+discardcorrupt",
         "-i", input.absolutePath,
-        "-filter:v", vf
+        "-filter:v", vf,
+        "-avoid_negative_ts", "make_zero"
     )
     if (includeAudio && audioFilter != null) {
         args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-async", "1", "-shortest"))
@@ -768,10 +773,12 @@ private fun buildConcatCommand(
 ): List<String> {
     val args = mutableListOf(
         "-y",
+        "-fflags", "+genpts+discardcorrupt",
         "-f", "concat",
         "-safe", "0",
         "-i", listFile.absolutePath,
-        "-c:v", "copy"
+        "-c:v", "copy",
+        "-avoid_negative_ts", "make_zero"
     )
     if (includeAudio) {
         args.addAll(listOf("-c:a", "copy"))
