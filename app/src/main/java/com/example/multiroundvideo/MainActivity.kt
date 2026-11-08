@@ -741,9 +741,6 @@ private fun buildSpeedCommand(
     val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
     val args = mutableListOf(
         "-y",
-        "-flags", "+low_delay",
-        "-fflags", "+nobuffer",
-        "-fps_mode", "passthrough",
         "-i", input.absolutePath,
         "-filter:v", vf
     )
@@ -766,7 +763,6 @@ private fun buildConcatCommand(
 ): List<String> {
     val args = mutableListOf(
         "-y",
-        "-fflags", "+nobuffer",
         "-f", "concat",
         "-safe", "0",
         "-i", listFile.absolutePath,
@@ -801,11 +797,9 @@ private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String?
         "libopenh264" -> listOf(
             "-c:v", "libopenh264",
             "-b:v", bitrate,
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
             "-threads", "0"
         )
-        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-preset", "ultrafast", "-threads", "0")
+        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-threads", "0")
     }
 }
 
