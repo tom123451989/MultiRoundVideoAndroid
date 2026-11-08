@@ -743,7 +743,7 @@ private fun buildSpeedCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val vf = if (encoder == "h264_mediacodec") "fps=30,setpts=PTS/$speed,format=nv12" else "fps=30,setpts=PTS/$speed"
+    val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
     val args = mutableListOf(
         "-y",
         "-i", input.absolutePath,
