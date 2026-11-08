@@ -738,14 +738,14 @@ private fun buildSpeedCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
+    val vf = if (encoder == "h264_mediacodec") "fps=30,setpts=PTS/$speed,format=nv12" else "fps=30,setpts=PTS/$speed"
     val args = mutableListOf(
         "-y",
         "-i", input.absolutePath,
         "-filter:v", vf
     )
     if (includeAudio && audioFilter != null) {
-        args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest"))
+        args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-async", "1", "-shortest"))
     } else {
         args.add("-an")
     }
