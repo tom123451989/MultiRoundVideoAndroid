@@ -36,17 +36,18 @@ class ProcessingMathTest {
     }
 
     @Test
-    fun highTempoUsesFastLinearInterpolationFilter() {
+    fun highTempoUsesOnlySupportedIndividualStages() {
         val filter = buildAtempoFilter(1000.0, 150.0)
-        assertTrue(filter.contains("asetrate=3840000"))
-        assertTrue(filter.contains("aresample=44100:async=1:linear_interp=1"))
+        assertEquals(9, Regex("atempo=2\\.0").findAll(filter).count())
+        assertTrue(filter.contains("aresample=async=1"))
         assertTrue(filter.contains("volume=1.5"))
     }
 
     @Test
-    fun lowTempoUsesStandardAtempoFilter() {
-        val filter = buildAtempoFilter(2.0, 100.0)
-        assertTrue(filter.contains("atempo=2.0"))
+    fun lowTempoIsSplitIntoValidStages() {
+        val filter = buildAtempoFilter(0.1, 100.0)
+        assertTrue(filter.contains("aresample=async=1"))
+        assertTrue(filter.contains("atempo=0.5"))
         assertTrue(filter.contains("volume=1.0"))
     }
 
@@ -61,9 +62,9 @@ class ProcessingMathTest {
     fun formatEtaFormatsSecondsCorrectly() {
         assertEquals("Calculating ETA…", formatEta(null))
         assertEquals("Finishing up…", formatEta(0L))
-        assertEquals("45s", formatEta(45L))
-        assertEquals("02:05", formatEta(125L))
-        assertEquals("1:02:05", formatEta(3725L))
+        assertEquals("ETA: 45s", formatEta(45L))
+        assertEquals("ETA: 02:05", formatEta(125L))
+        assertEquals("ETA: 1:02:05", formatEta(3725L))
     }
 
     @Test

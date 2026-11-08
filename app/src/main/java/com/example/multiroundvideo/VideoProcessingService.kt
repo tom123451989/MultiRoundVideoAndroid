@@ -12,7 +12,6 @@ import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.arthenica.ffmpegkit.FFmpegKit
 import kotlinx.coroutines.CancellationException
@@ -30,7 +29,6 @@ class VideoProcessingService : Service() {
     private val binder = LocalBinder()
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
-    private var wakeLock: PowerManager.WakeLock? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): VideoProcessingService = this@VideoProcessingService
@@ -88,12 +86,6 @@ class VideoProcessingService : Service() {
         finalMatchEnabled: Boolean
     ) {
         if (_isRunning.value) return
-
-        // Acquire WakeLock to prevent CPU sleeping when minimized or screen off
-        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-        wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MultiRoundVideo::BackgroundProcessingWakeLock")?.apply {
-            acquire(2 * 60 * 60 * 1000L) // 2 hours max safety timeout
-        }
 
         stopRequested.set(false)
         _isRunning.value = true
@@ -186,12 +178,6 @@ class VideoProcessingService : Service() {
             } finally {
                 _isRunning.value = false
                 stopRequested.set(false)
-                try {
-                    if (wakeLock?.isHeld == true) {
-                        wakeLock?.release()
-                    }
-                } catch (_: Throwable) {}
-                wakeLock = null
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf()
             }
@@ -281,12 +267,6 @@ class VideoProcessingService : Service() {
     }
 
     override fun onDestroy() {
-        try {
-            if (wakeLock?.isHeld == true) {
-                wakeLock?.release()
-            }
-        } catch (_: Throwable) {}
-        wakeLock = null
         serviceJob.cancel()
         super.onDestroy()
     }

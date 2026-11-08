@@ -189,7 +189,7 @@ private fun AppScreen(context: Context) {
                 CenterAlignedTopAppBar(title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("MULTI-ROUND VIDEO V5", fontWeight = FontWeight.Bold)
-                        Text("FAST STREAM COPY  •  INTELLI MODE  •  EXACT MATCH", style = MaterialTheme.typography.labelSmall)
+                        Text("HEARABLE AUDIO SAFEGUARD  •  FINAL EXACT MATCH", style = MaterialTheme.typography.labelSmall)
                     }
                 })
             }
@@ -426,9 +426,9 @@ internal suspend fun processVideo(
             ?: throw IOException("Android could not read the selected video.")
         inputStream.use { source -> inputFile.outputStream().use { target -> source.copyTo(target) } }
         if (!inputFile.exists() || inputFile.length() == 0L) throw IOException("Selected video is empty or could not be copied.")
-        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+        if (stopRequested.get()) throw IOException("Processing stopped by user.")
 
-        // Probe original video duration and file size once
+        // Probe original video duration and file size
         val retriever = MediaMetadataRetriever()
         var originalDurationSec = 0.0
         val originalSizeBytes = inputFile.length()
@@ -457,7 +457,7 @@ internal suspend fun processVideo(
             update(0.02f, "Encoder selected", "Preferred encoder: $activeEncoder.")
 
             for (round in 1..repeats) {
-                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+                if (stopRequested.get()) throw IOException("Processing stopped by user.")
                 val roundStartProgress = (round - 1).toFloat() / repeats
                 val roundMidProgress = (round - 0.5f).toFloat() / repeats
                 val roundEndProgress = round.toFloat() / repeats
@@ -482,10 +482,7 @@ internal suspend fun processVideo(
                     speed
                 }
 
-                // Process audio on the final round to avoid accumulating AAC header corruptions in intermediate steps
-                val isFinalRound = (round == repeats)
-                val shouldProcessAudio = includeAudio && isFinalRound
-                val audioFilter = if (shouldProcessAudio) buildAtempoFilter(effectiveRoundSpeed, audioBoost) else null
+                val audioFilter = if (includeAudio) buildAtempoFilter(effectiveRoundSpeed, audioBoost) else null
 
                 val roundSpeedLabel = if (intelliEnabled) {
                     "Intelli speed ${String.format(Locale.US, "%.1fx", effectiveRoundSpeed)} (joins: $joins untouched)…"
@@ -499,7 +496,7 @@ internal suspend fun processVideo(
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, effectiveRoundSpeed, audioFilter, shouldProcessAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, effectiveRoundSpeed, audioFilter, includeAudio, encoder, intelliTargetBitrate) },
                     onFallback = { fallbackMessage -> update(roundStartProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
@@ -517,14 +514,14 @@ internal suspend fun processVideo(
                     currentInput.delete()
                 }
 
-                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+                if (stopRequested.get()) throw IOException("Processing stopped by user.")
                 ensureFreeSpaceForConcat(outputDirectory, processedFile, joins)
-                update(roundMidProgress, "Round $round/$repeats — joining", "Stream-copy joining $joins copies instantly…")
+                update(roundMidProgress, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
                 val concatList = File(workDirectory, "concat_list_round$round.txt")
                 val concatEntry = "file '${processedFile.absolutePath.replace("'", "'\\''")}'"
                 concatList.bufferedWriter().use { writer ->
                     repeat(joins) {
-                        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+                        if (stopRequested.get()) throw IOException("Processing stopped by user.")
                         writer.append(concatEntry)
                         writer.newLine()
                     }
@@ -533,12 +530,12 @@ internal suspend fun processVideo(
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, shouldProcessAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, includeAudio, encoder, intelliTargetBitrate) },
                     onFallback = { fallbackMessage -> update(roundMidProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
                         val currentGlobalProg = (roundMidProgress + (localProg / repeats)).coerceIn(0f, 0.99f)
-                        update(currentGlobalProg, "Round $round/$repeats — joining", "Joining $joins copies…")
+                        update(currentGlobalProg, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
                     }
                 )
 
@@ -563,7 +560,6 @@ internal suspend fun processVideo(
 
             // Final Post-Processing Exact Duration Match Pass (if enabled)
             if (finalMatchEnabled) {
-                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
                 var finalDurationSec = 0.0
                 val finalRetriever = MediaMetadataRetriever()
                 try {
@@ -602,7 +598,7 @@ internal suspend fun processVideo(
             update(0.5f, "No processing rounds", "Full repeat rounds is 0; original video copied unchanged.")
         }
 
-        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+        if (stopRequested.get()) throw IOException("Processing stopped by user.")
         update(0.98f, "Finalizing output", "Preparing final MP4 in storage…")
         val stagedFinal = File(workDirectory, "${baseName}_final_${repeats}x.mp4")
         if (!currentInput.renameTo(stagedFinal)) {
@@ -611,7 +607,7 @@ internal suspend fun processVideo(
         if (!stagedFinal.exists() || stagedFinal.length() == 0L) {
             throw IOException("Final output file was not created correctly.")
         }
-        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
+        if (stopRequested.get()) throw IOException("Processing stopped by user.")
 
         if (finalFile.exists()) {
             backupFile = File(outputDirectory, ".backup_${System.currentTimeMillis()}_${finalFile.name}")
@@ -691,13 +687,8 @@ private suspend fun detectEncoderPlan(): EncoderPlan {
         if (hasOpenH264) add("libopenh264")
     }
     return when {
-        hasMpeg4 -> EncoderPlan("mpeg4", buildList {
-            if (hasHardwareH264) add("h264_mediacodec")
-            if (hasOpenH264) add("libopenh264")
-        })
-        hasHardwareH264 -> EncoderPlan("h264_mediacodec", buildList {
-            if (hasOpenH264) add("libopenh264")
-        })
+        hasHardwareH264 -> EncoderPlan("h264_mediacodec", softwareFallbacks)
+        hasMpeg4 -> EncoderPlan("mpeg4", softwareFallbacks.filterNot { it == "mpeg4" })
         hasOpenH264 -> EncoderPlan("libopenh264", emptyList())
         else -> throw IOException("This FFmpeg build exposes no supported MP4 video encoder.")
     }
@@ -718,15 +709,13 @@ private suspend fun executeEncodeWithFallback(
     }
     var lastError: Throwable? = null
     for (i in encoderChain.indices) {
-        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
         val encoder = encoderChain[i]
         try {
             executeFFmpeg(commandFactory(encoder), onStatistics)
             return encoder
         } catch (error: Throwable) {
-            if (error is CancellationException || stopRequested.get()) {
-                throw CancellationException("Processing stopped by user.")
-            }
+            if (error is CancellationException) throw error
+            if (stopRequested.get()) throw IOException("Processing stopped by user.", error)
             lastError = error
             val nextEncoder = encoderChain.getOrNull(i + 1)
             if (nextEncoder != null) {
@@ -746,20 +735,11 @@ private fun buildSpeedCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val vf = if (encoder == "h264_mediacodec") "fps=30,setpts=N/(30*TB),format=nv12" else "fps=30,setpts=N/(30*TB)"
-    val args = mutableListOf(
-        "-y",
-        "-fflags", "+genpts+discardcorrupt",
-        "-i", input.absolutePath,
-        "-filter:v", vf,
-        "-avoid_negative_ts", "make_zero"
-    )
-    if (includeAudio && audioFilter != null) {
-        args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-async", "1", "-shortest"))
-    } else {
-        args.add("-an")
-    }
+    val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
+    val args = mutableListOf("-y", "-i", input.absolutePath, "-filter:v", vf)
+    if (includeAudio && audioFilter != null) args.addAll(listOf("-filter:a", audioFilter)) else args.add("-an")
     args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
+    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad"))
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
@@ -771,25 +751,18 @@ private fun buildConcatCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val args = mutableListOf(
-        "-y",
-        "-fflags", "+genpts+discardcorrupt",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listFile.absolutePath,
-        "-c:v", "copy",
-        "-avoid_negative_ts", "make_zero"
-    )
-    if (includeAudio) {
-        args.addAll(listOf("-c:a", "copy"))
-    } else {
-        args.add("-an")
+    val args = mutableListOf("-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath)
+    if (encoder == "h264_mediacodec") {
+        args.addAll(listOf("-vf", "format=nv12"))
     }
+    args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
+    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad")) else args.add("-an")
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
 
 private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String? = null): List<String> {
+    val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1).toString()
     val bitrate = intelliTargetBitrate ?: "1500k"
     return when (encoder) {
         "h264_mediacodec" -> listOf(
@@ -800,18 +773,19 @@ private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String?
         "mpeg4" -> if (intelliTargetBitrate != null) listOf(
             "-c:v", "mpeg4",
             "-b:v", bitrate,
-            "-threads", "0"
+            "-threads", cores
         ) else listOf(
             "-c:v", "mpeg4",
-            "-q:v", "5",
-            "-threads", "0"
+            "-q:v", "7",
+            "-threads", cores
         )
         "libopenh264" -> listOf(
             "-c:v", "libopenh264",
             "-b:v", bitrate,
-            "-threads", "0"
+            "-preset", "ultrafast",
+            "-threads", cores
         )
-        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-threads", "0")
+        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-threads", cores)
     }
 }
 
@@ -831,8 +805,6 @@ private suspend fun executeFFmpeg(
                 }
                 if (ReturnCode.isSuccess(session.returnCode)) {
                     runCatching { continuation.resume(output) }
-                } else if (ReturnCode.isCancel(session.returnCode) || stopRequested.get()) {
-                    runCatching { continuation.resumeWith(Result.failure(CancellationException("FFmpeg session cancelled by user."))) }
                 } else {
                     val details = output.takeLast(3500).ifBlank { session.failStackTrace ?: "No FFmpeg diagnostics were returned." }
                     runCatching { continuation.resumeWith(Result.failure(IOException("FFmpeg failed (${session.returnCode}): $details"))) }

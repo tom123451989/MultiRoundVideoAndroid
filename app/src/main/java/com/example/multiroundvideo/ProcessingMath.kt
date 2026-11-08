@@ -45,30 +45,27 @@ private fun formatScientific(log10Value: Double): String {
     return String.format(Locale.US, "%.6f × 10^%d", mantissa, exponent)
 }
 
-/** Builds fast, non-blocking audio speed filters using atempo for <=8x and ultrafast linear interpolation asetrate for >8x. */
+/** Builds atempo stages that keep each individual tempo factor in FFmpeg's 0.5–2 range with aresample protection. */
 internal fun buildAtempoFilter(speed: Double, volumePercent: Double): String {
     require(speed.isFinite() && speed > 0.0) { "Speed factor must be a finite positive number." }
     require(volumePercent.isFinite() && volumePercent >= 0.0) { "Audio boost must be a finite non-negative number." }
 
-    val volume = volumePercent / 100.0
-    return if (speed <= 8.0) {
-        val filters = mutableListOf<String>()
-        var remaining = speed
-        while (remaining > 2.0) {
-            filters.add("atempo=2.0")
-            remaining /= 2.0
-        }
-        while (remaining < 0.5) {
-            filters.add("atempo=0.5")
-            remaining /= 0.5
-        }
-        filters.add("atempo=$remaining")
-        filters.add("volume=$volume")
-        filters.joinToString(",")
-    } else {
-        val targetSampleRate = (44100.0 * speed).toLong().coerceIn(1000L, 3840000L)
-        "asetrate=$targetSampleRate,aresample=44100:async=1:linear_interp=1,volume=$volume"
+    val filters = mutableListOf<String>()
+    filters.add("aresample=async=1")
+    filters.add("aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo")
+
+    var remaining = speed
+    while (remaining > 2.0) {
+        filters.add("atempo=2.0")
+        remaining /= 2.0
     }
+    while (remaining < 0.5) {
+        filters.add("atempo=0.5")
+        remaining /= 0.5
+    }
+    filters.add("atempo=$remaining")
+    filters.add("volume=${volumePercent / 100.0}")
+    return filters.joinToString(",")
 }
 
 /** Calculates estimated remaining time in seconds based on elapsed time and current progress (0.0 .. 1.0). */
@@ -88,9 +85,9 @@ internal fun formatEta(etaSeconds: Long?): String {
     val minutes = (etaSeconds % 3600L) / 60L
     val seconds = etaSeconds % 60L
     return when {
-        hours > 0 -> String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
-        minutes > 0 -> String.format(Locale.US, "%02d:%02d", minutes, seconds)
-        else -> String.format(Locale.US, "%ds", seconds)
+        hours > 0 -> String.format(Locale.US, "ETA: %d:%02d:%02d", hours, minutes, seconds)
+        minutes > 0 -> String.format(Locale.US, "ETA: %02d:%02d", minutes, seconds)
+        else -> String.format(Locale.US, "ETA: %ds", seconds)
     }
 }
 
