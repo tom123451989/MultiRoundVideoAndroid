@@ -737,9 +737,12 @@ private fun buildSpeedCommand(
 ): List<String> {
     val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
     val args = mutableListOf("-y", "-i", input.absolutePath, "-filter:v", vf)
-    if (includeAudio && audioFilter != null) args.addAll(listOf("-filter:a", audioFilter)) else args.add("-an")
+    if (includeAudio && audioFilter != null) {
+        args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest"))
+    } else {
+        args.add("-an")
+    }
     args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
-    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad"))
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
@@ -756,7 +759,11 @@ private fun buildConcatCommand(
         args.addAll(listOf("-vf", "format=nv12"))
     }
     args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
-    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad")) else args.add("-an")
+    if (includeAudio) {
+        args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "aresample=async=1,apad", "-shortest"))
+    } else {
+        args.add("-an")
+    }
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
