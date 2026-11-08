@@ -426,7 +426,7 @@ internal suspend fun processVideo(
             ?: throw IOException("Android could not read the selected video.")
         inputStream.use { source -> inputFile.outputStream().use { target -> source.copyTo(target) } }
         if (!inputFile.exists() || inputFile.length() == 0L) throw IOException("Selected video is empty or could not be copied.")
-        if (stopRequested.get()) throw IOException("Processing stopped by user.")
+        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
 
         // Probe original video duration and file size
         val retriever = MediaMetadataRetriever()
@@ -457,7 +457,7 @@ internal suspend fun processVideo(
             update(0.02f, "Encoder selected", "Preferred encoder: $activeEncoder.")
 
             for (round in 1..repeats) {
-                if (stopRequested.get()) throw IOException("Processing stopped by user.")
+                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
                 val roundStartProgress = (round - 1).toFloat() / repeats
                 val roundMidProgress = (round - 0.5f).toFloat() / repeats
                 val roundEndProgress = round.toFloat() / repeats
@@ -514,14 +514,14 @@ internal suspend fun processVideo(
                     currentInput.delete()
                 }
 
-                if (stopRequested.get()) throw IOException("Processing stopped by user.")
+                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
                 ensureFreeSpaceForConcat(outputDirectory, processedFile, joins)
                 update(roundMidProgress, "Round $round/$repeats — joining", "Stream-copy joining $joins copies instantly…")
                 val concatList = File(workDirectory, "concat_list_round$round.txt")
                 val concatEntry = "file '${processedFile.absolutePath.replace("'", "'\\''")}'"
                 concatList.bufferedWriter().use { writer ->
                     repeat(joins) {
-                        if (stopRequested.get()) throw IOException("Processing stopped by user.")
+                        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
                         writer.append(concatEntry)
                         writer.newLine()
                     }
@@ -560,6 +560,7 @@ internal suspend fun processVideo(
 
             // Final Post-Processing Exact Duration Match Pass (if enabled)
             if (finalMatchEnabled) {
+                if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
                 var finalDurationSec = 0.0
                 val finalRetriever = MediaMetadataRetriever()
                 try {
@@ -598,7 +599,7 @@ internal suspend fun processVideo(
             update(0.5f, "No processing rounds", "Full repeat rounds is 0; original video copied unchanged.")
         }
 
-        if (stopRequested.get()) throw IOException("Processing stopped by user.")
+        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
         update(0.98f, "Finalizing output", "Preparing final MP4 in storage…")
         val stagedFinal = File(workDirectory, "${baseName}_final_${repeats}x.mp4")
         if (!currentInput.renameTo(stagedFinal)) {
@@ -607,7 +608,7 @@ internal suspend fun processVideo(
         if (!stagedFinal.exists() || stagedFinal.length() == 0L) {
             throw IOException("Final output file was not created correctly.")
         }
-        if (stopRequested.get()) throw IOException("Processing stopped by user.")
+        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
 
         if (finalFile.exists()) {
             backupFile = File(outputDirectory, ".backup_${System.currentTimeMillis()}_${finalFile.name}")
@@ -709,13 +710,15 @@ private suspend fun executeEncodeWithFallback(
     }
     var lastError: Throwable? = null
     for (i in encoderChain.indices) {
+        if (stopRequested.get()) throw CancellationException("Processing stopped by user.")
         val encoder = encoderChain[i]
         try {
             executeFFmpeg(commandFactory(encoder), onStatistics)
             return encoder
         } catch (error: Throwable) {
-            if (error is CancellationException) throw error
-            if (stopRequested.get()) throw IOException("Processing stopped by user.", error)
+            if (error is CancellationException || stopRequested.get()) {
+                throw CancellationException("Processing stopped by user.")
+            }
             lastError = error
             val nextEncoder = encoderChain.getOrNull(i + 1)
             if (nextEncoder != null) {
@@ -808,6 +811,8 @@ private suspend fun executeFFmpeg(
                 }
                 if (ReturnCode.isSuccess(session.returnCode)) {
                     runCatching { continuation.resume(output) }
+                } else if (ReturnCode.isCancel(session.returnCode) || stopRequested.get()) {
+                    runCatching { continuation.resumeWith(Result.failure(CancellationException("FFmpeg session cancelled by user."))) }
                 } else {
                     val details = output.takeLast(3500).ifBlank { session.failStackTrace ?: "No FFmpeg diagnostics were returned." }
                     runCatching { continuation.resumeWith(Result.failure(IOException("FFmpeg failed (${session.returnCode}): $details"))) }
