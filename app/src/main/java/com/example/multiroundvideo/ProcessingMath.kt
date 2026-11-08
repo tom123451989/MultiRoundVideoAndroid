@@ -45,14 +45,13 @@ private fun formatScientific(log10Value: Double): String {
     return String.format(Locale.US, "%.6f × 10^%d", mantissa, exponent)
 }
 
-/** Builds atempo stages that keep each individual tempo factor in FFmpeg's 0.5–2 range with aresample protection and apad. */
+/** Builds atempo stages that keep each individual tempo factor in FFmpeg's 0.5–2 range with aresample protection. */
 internal fun buildAtempoFilter(speed: Double, volumePercent: Double): String {
     require(speed.isFinite() && speed > 0.0) { "Speed factor must be a finite positive number." }
     require(volumePercent.isFinite() && volumePercent >= 0.0) { "Audio boost must be a finite non-negative number." }
 
     val filters = mutableListOf<String>()
     filters.add("aresample=async=1")
-    filters.add("aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo")
 
     var remaining = speed
     while (remaining > 2.0) {
@@ -65,7 +64,6 @@ internal fun buildAtempoFilter(speed: Double, volumePercent: Double): String {
     }
     filters.add("atempo=$remaining")
     filters.add("volume=${volumePercent / 100.0}")
-    filters.add("apad")
     return filters.joinToString(",")
 }
 

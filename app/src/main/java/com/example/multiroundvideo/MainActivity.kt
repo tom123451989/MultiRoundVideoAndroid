@@ -189,7 +189,7 @@ private fun AppScreen(context: Context) {
                 CenterAlignedTopAppBar(title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("MULTI-ROUND VIDEO V5", fontWeight = FontWeight.Bold)
-                        Text("HEARABLE AUDIO SAFEGUARD  •  FINAL EXACT MATCH", style = MaterialTheme.typography.labelSmall)
+                        Text("FAST STREAM COPY  •  INTELLI MODE  •  EXACT MATCH", style = MaterialTheme.typography.labelSmall)
                     }
                 })
             }
@@ -516,7 +516,7 @@ internal suspend fun processVideo(
 
                 if (stopRequested.get()) throw IOException("Processing stopped by user.")
                 ensureFreeSpaceForConcat(outputDirectory, processedFile, joins)
-                update(roundMidProgress, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
+                update(roundMidProgress, "Round $round/$repeats — joining", "Stream-copy joining $joins copies instantly…")
                 val concatList = File(workDirectory, "concat_list_round$round.txt")
                 val concatEntry = "file '${processedFile.absolutePath.replace("'", "'\\''")}'"
                 concatList.bufferedWriter().use { writer ->
@@ -535,7 +535,7 @@ internal suspend fun processVideo(
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
                         val currentGlobalProg = (roundMidProgress + (localProg / repeats)).coerceIn(0f, 0.99f)
-                        update(currentGlobalProg, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
+                        update(currentGlobalProg, "Round $round/$repeats — joining", "Joining $joins copies…")
                     }
                 )
 
@@ -754,13 +754,9 @@ private fun buildConcatCommand(
     encoder: String,
     intelliTargetBitrate: String? = null
 ): List<String> {
-    val args = mutableListOf("-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath)
-    if (encoder == "h264_mediacodec") {
-        args.addAll(listOf("-vf", "format=nv12"))
-    }
-    args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
+    val args = mutableListOf("-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath, "-c:v", "copy")
     if (includeAudio) {
-        args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "aresample=async=1,apad", "-shortest"))
+        args.addAll(listOf("-c:a", "copy"))
     } else {
         args.add("-an")
     }
@@ -783,7 +779,7 @@ private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String?
             "-threads", cores
         ) else listOf(
             "-c:v", "mpeg4",
-            "-q:v", "7",
+            "-q:v", "5",
             "-threads", cores
         )
         "libopenh264" -> listOf(
