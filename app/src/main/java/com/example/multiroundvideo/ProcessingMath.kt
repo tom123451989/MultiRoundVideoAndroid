@@ -45,14 +45,30 @@ private fun formatScientific(log10Value: Double): String {
     return String.format(Locale.US, "%.6f × 10^%d", mantissa, exponent)
 }
 
-/** Builds single-pass asetrate+aresample audio speed filters that never deadlock FFmpeg's buffer queue. */
+/** Builds fast, non-blocking audio speed filters using atempo for <=8x and ultrafast linear interpolation asetrate for >8x. */
 internal fun buildAtempoFilter(speed: Double, volumePercent: Double): String {
     require(speed.isFinite() && speed > 0.0) { "Speed factor must be a finite positive number." }
     require(volumePercent.isFinite() && volumePercent >= 0.0) { "Audio boost must be a finite non-negative number." }
 
     val volume = volumePercent / 100.0
-    val targetSampleRate = (44100.0 * speed).toLong().coerceIn(1000L, 3840000L)
-    return "asetrate=$targetSampleRate,aresample=44100:async=1,volume=$volume"
+    return if (speed <= 8.0) {
+        val filters = mutableListOf<String>()
+        var remaining = speed
+        while (remaining > 2.0) {
+            filters.add("atempo=2.0")
+            remaining /= 2.0
+        }
+        while (remaining < 0.5) {
+            filters.add("atempo=0.5")
+            remaining /= 0.5
+        }
+        filters.add("atempo=$remaining")
+        filters.add("volume=$volume")
+        filters.joinToString(",")
+    } else {
+        val targetSampleRate = (44100.0 * speed).toLong().coerceIn(1000L, 3840000L)
+        "asetrate=$targetSampleRate,aresample=44100:async=1:linear_interp=1,volume=$volume"
+    }
 }
 
 /** Calculates estimated remaining time in seconds based on elapsed time and current progress (0.0 .. 1.0). */
@@ -72,9 +88,9 @@ internal fun formatEta(etaSeconds: Long?): String {
     val minutes = (etaSeconds % 3600L) / 60L
     val seconds = etaSeconds % 60L
     return when {
-        hours > 0 -> String.format(Locale.US, "ETA: %d:%02d:%02d", hours, minutes, seconds)
-        minutes > 0 -> String.format(Locale.US, "ETA: %02d:%02d", minutes, seconds)
-        else -> String.format(Locale.US, "ETA: %ds", seconds)
+        hours > 0 -> String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+        minutes > 0 -> String.format(Locale.US, "%02d:%02d", minutes, seconds)
+        else -> String.format(Locale.US, "%ds", seconds)
     }
 }
 
