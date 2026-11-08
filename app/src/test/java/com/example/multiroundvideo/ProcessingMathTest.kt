@@ -36,16 +36,18 @@ class ProcessingMathTest {
     }
 
     @Test
-    fun highTempoUsesOnlySupportedIndividualStages() {
+    fun highTempoUsesSinglePassAsetrateFilter() {
         val filter = buildAtempoFilter(1000.0, 150.0)
-        assertEquals(9, Regex("atempo=2\\.0").findAll(filter).count())
+        assertTrue(filter.contains("asetrate=3840000"))
+        assertTrue(filter.contains("aresample=44100:async=1"))
         assertTrue(filter.contains("volume=1.5"))
     }
 
     @Test
-    fun lowTempoIsSplitIntoValidStages() {
+    fun lowTempoUsesSinglePassAsetrateFilter() {
         val filter = buildAtempoFilter(0.1, 100.0)
-        assertTrue(filter.contains("atempo=0.5"))
+        assertTrue(filter.contains("asetrate=4410"))
+        assertTrue(filter.contains("aresample=44100:async=1"))
         assertTrue(filter.contains("volume=1.0"))
     }
 
