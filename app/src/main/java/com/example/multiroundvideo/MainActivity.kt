@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -64,7 +63,6 @@ import androidx.core.content.ContextCompat
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.Statistics
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -94,8 +92,6 @@ private fun AppScreen(context: Context) {
     var repeatsText by remember { mutableStateOf("2") }
     var audioEnabled by remember { mutableStateOf(true) }
     var boostText by remember { mutableStateOf("150") }
-    var intelliEnabled by remember { mutableStateOf(false) }
-    var finalMatchEnabled by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
 
     val isRunning by VideoProcessingService.isRunning.collectAsState()
@@ -188,8 +184,8 @@ private fun AppScreen(context: Context) {
             topBar = {
                 CenterAlignedTopAppBar(title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("MULTI-ROUND VIDEO V5", fontWeight = FontWeight.Bold)
-                        Text("HEARABLE AUDIO SAFEGUARD  •  FINAL EXACT MATCH", style = MaterialTheme.typography.labelSmall)
+                        Text("MULTI-ROUND VIDEO V4", fontWeight = FontWeight.Bold)
+                        Text("BACKGROUND SERVICE  •  REAL-TIME ETA  •  MULTI-THREADING", style = MaterialTheme.typography.labelSmall)
                     }
                 })
             }
@@ -217,30 +213,14 @@ private fun AppScreen(context: Context) {
                 Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Processing settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        NumberField("Speed-up factor (base)", speedText, { speedText = it }, "e.g. 1000", KeyboardType.Decimal, enabled = !isRunning && !isSaving && !intelliEnabled)
-                        NumberField("Join count per round (untouched)", joinsText, { joinsText = it }, "e.g. 2", KeyboardType.Number, enabled = !isRunning && !isSaving)
+                        NumberField("Speed-up factor (base)", speedText, { speedText = it }, "e.g. 1000", KeyboardType.Decimal, enabled = !isRunning && !isSaving)
+                        NumberField("Join count per round", joinsText, { joinsText = it }, "e.g. 2", KeyboardType.Number, enabled = !isRunning && !isSaving)
                         NumberField("Full repeat rounds", repeatsText, { repeatsText = it }, "e.g. 2", KeyboardType.Number, enabled = !isRunning && !isSaving)
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Intelli Mode", fontWeight = FontWeight.Medium)
-                                Text("Auto-adjusts speed per round to match duration & size (joins untouched)", style = MaterialTheme.typography.bodySmall)
-                            }
-                            Switch(checked = intelliEnabled, onCheckedChange = { intelliEnabled = it }, enabled = !isRunning && !isSaving)
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Final Exact Match", fontWeight = FontWeight.Medium)
-                                Text("Speeds up final output after all repeats to match original 30s duration", style = MaterialTheme.typography.bodySmall)
-                            }
-                            Switch(checked = finalMatchEnabled, onCheckedChange = { finalMatchEnabled = it }, enabled = !isRunning && !isSaving)
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Include audio (Safeguarded)", fontWeight = FontWeight.Medium)
-                                Text("Guarantees hearable, synced audio after every full repeat", style = MaterialTheme.typography.bodySmall)
+                                Text("Include audio", fontWeight = FontWeight.Medium)
+                                Text("Include audio track during processing", style = MaterialTheme.typography.bodySmall)
                             }
                             Switch(checked = audioEnabled, onCheckedChange = { audioEnabled = it }, enabled = !isRunning && !isSaving)
                         }
@@ -297,15 +277,13 @@ private fun AppScreen(context: Context) {
                                         joins = joinCount,
                                         repeats = roundCount,
                                         includeAudio = audioEnabled,
-                                        audioBoost = audioBoost,
-                                        intelliEnabled = intelliEnabled,
-                                        finalMatchEnabled = finalMatchEnabled
+                                        audioBoost = audioBoost
                                     )
                                 }
                             ) {
                                 androidx.compose.material3.Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
-                                Text("Start V5")
+                                Text("Start V4")
                             }
                             OutlinedButton(
                                 enabled = isRunning,
@@ -392,8 +370,6 @@ internal suspend fun processVideo(
     includeAudio: Boolean,
     audioBoost: Double,
     repeats: Int,
-    intelliEnabled: Boolean = false,
-    finalMatchEnabled: Boolean = false,
     update: (Float, String, String) -> Unit
 ): File = withContext(Dispatchers.IO) {
     val outputDirectory = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
@@ -428,26 +404,6 @@ internal suspend fun processVideo(
         if (!inputFile.exists() || inputFile.length() == 0L) throw IOException("Selected video is empty or could not be copied.")
         if (stopRequested.get()) throw IOException("Processing stopped by user.")
 
-        // Probe original video duration and file size
-        val retriever = MediaMetadataRetriever()
-        var originalDurationSec = 0.0
-        val originalSizeBytes = inputFile.length()
-        try {
-            retriever.setDataSource(inputFile.absolutePath)
-            val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-            if (durStr != null) {
-                originalDurationSec = (durStr.toDoubleOrNull() ?: 0.0) / 1000.0
-            }
-        } catch (_: Throwable) {
-        } finally {
-            try { retriever.release() } catch (_: Throwable) {}
-        }
-        if (originalDurationSec <= 0.0) {
-            originalDurationSec = 30.0
-        }
-
-        val intelliTargetBitrate = if (intelliEnabled) calculateTargetBitrate(originalSizeBytes, originalDurationSec) else null
-
         var currentInput = inputFile
         var activeEncoder = "copy"
 
@@ -456,52 +412,26 @@ internal suspend fun processVideo(
             activeEncoder = encoderPlan.preferred
             update(0.02f, "Encoder selected", "Preferred encoder: $activeEncoder.")
 
+            val audioFilter = if (includeAudio) buildAtempoFilter(speed, audioBoost) else null
+
             for (round in 1..repeats) {
                 if (stopRequested.get()) throw IOException("Processing stopped by user.")
                 val roundStartProgress = (round - 1).toFloat() / repeats
                 val roundMidProgress = (round - 0.5f).toFloat() / repeats
                 val roundEndProgress = round.toFloat() / repeats
 
-                var currentInputDurationSec = originalDurationSec
-                val roundRetriever = MediaMetadataRetriever()
-                try {
-                    roundRetriever.setDataSource(currentInput.absolutePath)
-                    val dStr = roundRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    if (dStr != null) {
-                        val dSec = (dStr.toDoubleOrNull() ?: 0.0) / 1000.0
-                        if (dSec > 0.0) currentInputDurationSec = dSec
-                    }
-                } catch (_: Throwable) {
-                } finally {
-                    try { roundRetriever.release() } catch (_: Throwable) {}
-                }
-
-                val effectiveRoundSpeed = if (intelliEnabled) {
-                    calculateIntelliSpeed(currentInputDurationSec, joins, originalDurationSec)
-                } else {
-                    speed
-                }
-
-                val audioFilter = if (includeAudio) buildAtempoFilter(effectiveRoundSpeed, audioBoost) else null
-
-                val roundSpeedLabel = if (intelliEnabled) {
-                    "Intelli speed ${String.format(Locale.US, "%.1fx", effectiveRoundSpeed)} (joins: $joins untouched)…"
-                } else {
-                    "Applying video speed factor $speed…"
-                }
-
-                update(roundStartProgress, "Round $round/$repeats — speed-up", roundSpeedLabel)
+                update(roundStartProgress, "Round $round/$repeats — speed-up", "Applying video speed factor $speed…")
                 val processedFile = File(workDirectory, "processed_round$round.mp4")
 
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, effectiveRoundSpeed, audioFilter, includeAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildSpeedCommand(currentInput, processedFile, speed, audioFilter, includeAudio, encoder) },
                     onFallback = { fallbackMessage -> update(roundStartProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
                         val currentGlobalProg = (roundStartProgress + (localProg / repeats)).coerceIn(0f, 0.99f)
-                        update(currentGlobalProg, "Round $round/$repeats — speed-up", roundSpeedLabel)
+                        update(currentGlobalProg, "Round $round/$repeats — speed-up", "Applying video speed factor $speed…")
                     }
                 )
 
@@ -509,14 +439,13 @@ internal suspend fun processVideo(
                     throw IOException("Round $round speed-up produced an empty output file.")
                 }
 
-                // Immediate cleanup of source input after speed-up
                 if (currentInput != inputFile) {
                     currentInput.delete()
                 }
 
                 if (stopRequested.get()) throw IOException("Processing stopped by user.")
                 ensureFreeSpaceForConcat(outputDirectory, processedFile, joins)
-                update(roundMidProgress, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
+                update(roundMidProgress, "Round $round/$repeats — joining", "Joining $joins copies…")
                 val concatList = File(workDirectory, "concat_list_round$round.txt")
                 val concatEntry = "file '${processedFile.absolutePath.replace("'", "'\\''")}'"
                 concatList.bufferedWriter().use { writer ->
@@ -530,12 +459,12 @@ internal suspend fun processVideo(
                 activeEncoder = executeEncodeWithFallback(
                     plan = encoderPlan,
                     currentEncoder = activeEncoder,
-                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, includeAudio, encoder, intelliTargetBitrate) },
+                    commandFactory = { encoder -> buildConcatCommand(concatList, joinedFile, includeAudio, encoder) },
                     onFallback = { fallbackMessage -> update(roundMidProgress, "Switching encoder", fallbackMessage) },
                     onStatistics = { stats ->
                         val localProg = (stats.time / 1000.0).toFloat().coerceIn(0f, 1f) * 0.5f
                         val currentGlobalProg = (roundMidProgress + (localProg / repeats)).coerceIn(0f, 0.99f)
-                        update(currentGlobalProg, "Round $round/$repeats — joining & compressing", "Joining $joins copies…")
+                        update(currentGlobalProg, "Round $round/$repeats — joining", "Joining $joins copies…")
                     }
                 )
 
@@ -543,57 +472,18 @@ internal suspend fun processVideo(
                     throw IOException("Round $round join produced an empty output file.")
                 }
 
-                // Immediate per-round intermediate file cleanup to free disk space & RAM
                 processedFile.delete()
                 concatList.delete()
 
                 currentInput = joinedFile
                 update(roundEndProgress, "Round $round/$repeats complete", "Current encoder: $activeEncoder")
 
-                // Remove any old intermediate files left over from prior rounds
                 workDirectory.listFiles()?.forEach { file ->
                     if (file != currentInput && file != inputFile && file.exists()) {
                         file.delete()
                     }
                 }
             }
-
-            // Final Post-Processing Exact Duration Match Pass (if enabled)
-            if (finalMatchEnabled) {
-                var finalDurationSec = 0.0
-                val finalRetriever = MediaMetadataRetriever()
-                try {
-                    finalRetriever.setDataSource(currentInput.absolutePath)
-                    val dStr = finalRetriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    if (dStr != null) {
-                        finalDurationSec = (dStr.toDoubleOrNull() ?: 0.0) / 1000.0
-                    }
-                } catch (_: Throwable) {
-                } finally {
-                    try { finalRetriever.release() } catch (_: Throwable) {}
-                }
-
-                if (finalDurationSec > 0.0 && originalDurationSec > 0.0 && Math.abs(finalDurationSec - originalDurationSec) > 0.5) {
-                    val finalRequiredSpeed = finalDurationSec / originalDurationSec
-                    update(0.95f, "Final Exact Match", "Matching duration ${String.format(Locale.US, "%.1fs", finalDurationSec)} -> ${String.format(Locale.US, "%.1fs", originalDurationSec)} (${String.format(Locale.US, "%.1fx", finalRequiredSpeed)} speed-up)…")
-
-                    val finalMatchedFile = File(workDirectory, "final_matched.mp4")
-                    val finalAudioFilter = if (includeAudio) buildAtempoFilter(finalRequiredSpeed, audioBoost) else null
-
-                    activeEncoder = executeEncodeWithFallback(
-                        plan = encoderPlan,
-                        currentEncoder = activeEncoder,
-                        commandFactory = { encoder -> buildSpeedCommand(currentInput, finalMatchedFile, finalRequiredSpeed, finalAudioFilter, includeAudio, encoder, intelliTargetBitrate) },
-                        onFallback = { fallbackMessage -> update(0.95f, "Switching encoder", fallbackMessage) }
-                    )
-
-                    if (finalMatchedFile.exists() && finalMatchedFile.length() > 0L) {
-                        currentInput.delete()
-                        currentInput = finalMatchedFile
-                    }
-                }
-            }
-
         } else {
             update(0.5f, "No processing rounds", "Full repeat rounds is 0; original video copied unchanged.")
         }
@@ -709,12 +599,12 @@ private suspend fun executeEncodeWithFallback(
     }
     var lastError: Throwable? = null
     for (i in encoderChain.indices) {
+        if (stopRequested.get()) throw IOException("Processing stopped by user.")
         val encoder = encoderChain[i]
         try {
             executeFFmpeg(commandFactory(encoder), onStatistics)
             return encoder
         } catch (error: Throwable) {
-            if (error is CancellationException) throw error
             if (stopRequested.get()) throw IOException("Processing stopped by user.", error)
             lastError = error
             val nextEncoder = encoderChain.getOrNull(i + 1)
@@ -732,14 +622,16 @@ private fun buildSpeedCommand(
     speed: Double,
     audioFilter: String?,
     includeAudio: Boolean,
-    encoder: String,
-    intelliTargetBitrate: String? = null
+    encoder: String
 ): List<String> {
     val vf = if (encoder == "h264_mediacodec") "setpts=PTS/$speed,format=nv12" else "setpts=PTS/$speed"
     val args = mutableListOf("-y", "-i", input.absolutePath, "-filter:v", vf)
-    if (includeAudio && audioFilter != null) args.addAll(listOf("-filter:a", audioFilter)) else args.add("-an")
-    args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
-    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad"))
+    if (includeAudio && audioFilter != null) {
+        args.addAll(listOf("-filter:a", audioFilter, "-c:a", "aac"))
+    } else {
+        args.add("-an")
+    }
+    args.addAll(videoEncoderArguments(encoder))
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
@@ -748,44 +640,26 @@ private fun buildConcatCommand(
     listFile: File,
     output: File,
     includeAudio: Boolean,
-    encoder: String,
-    intelliTargetBitrate: String? = null
+    encoder: String
 ): List<String> {
     val args = mutableListOf("-y", "-f", "concat", "-safe", "0", "-i", listFile.absolutePath)
-    if (encoder == "h264_mediacodec") {
-        args.addAll(listOf("-vf", "format=nv12"))
+    args.addAll(videoEncoderArguments(encoder))
+    if (includeAudio) {
+        args.addAll(listOf("-c:a", "aac"))
+    } else {
+        args.add("-an")
     }
-    args.addAll(videoEncoderArguments(encoder, intelliTargetBitrate))
-    if (includeAudio) args.addAll(listOf("-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-af", "apad")) else args.add("-an")
     args.addAll(listOf("-movflags", "+faststart", output.absolutePath))
     return args
 }
 
-private fun videoEncoderArguments(encoder: String, intelliTargetBitrate: String? = null): List<String> {
+private fun videoEncoderArguments(encoder: String): List<String> {
     val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1).toString()
-    val bitrate = intelliTargetBitrate ?: "1500k"
     return when (encoder) {
-        "h264_mediacodec" -> listOf(
-            "-c:v", encoder,
-            "-b:v", bitrate,
-            "-pix_fmt", "nv12"
-        )
-        "mpeg4" -> if (intelliTargetBitrate != null) listOf(
-            "-c:v", "mpeg4",
-            "-b:v", bitrate,
-            "-threads", cores
-        ) else listOf(
-            "-c:v", "mpeg4",
-            "-q:v", "7",
-            "-threads", cores
-        )
-        "libopenh264" -> listOf(
-            "-c:v", "libopenh264",
-            "-b:v", bitrate,
-            "-preset", "ultrafast",
-            "-threads", cores
-        )
-        else -> listOf("-c:v", encoder, "-b:v", bitrate, "-threads", cores)
+        "h264_mediacodec" -> listOf("-c:v", encoder, "-b:v", "1500k", "-pix_fmt", "nv12")
+        "mpeg4" -> listOf("-c:v", "mpeg4", "-b:v", "1500k", "-threads", cores)
+        "libopenh264" -> listOf("-c:v", "libopenh264", "-b:v", "1500k", "-preset", "ultrafast", "-threads", cores)
+        else -> listOf("-c:v", encoder, "-b:v", "1500k", "-threads", cores)
     }
 }
 

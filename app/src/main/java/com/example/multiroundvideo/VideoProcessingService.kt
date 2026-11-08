@@ -52,8 +52,6 @@ class VideoProcessingService : Service() {
                 val repeats = intent.getIntExtra(EXTRA_REPEATS, 2)
                 val includeAudio = intent.getBooleanExtra(EXTRA_INCLUDE_AUDIO, true)
                 val audioBoost = intent.getDoubleExtra(EXTRA_AUDIO_BOOST, 150.0)
-                val intelliEnabled = intent.getBooleanExtra(EXTRA_INTELLI_ENABLED, false)
-                val finalMatchEnabled = intent.getBooleanExtra(EXTRA_FINAL_MATCH_ENABLED, false)
 
                 startProcessingInForeground(
                     uri = uri,
@@ -62,9 +60,7 @@ class VideoProcessingService : Service() {
                     joins = joins,
                     repeats = repeats,
                     includeAudio = includeAudio,
-                    audioBoost = audioBoost,
-                    intelliEnabled = intelliEnabled,
-                    finalMatchEnabled = finalMatchEnabled
+                    audioBoost = audioBoost
                 )
             }
             ACTION_STOP -> {
@@ -81,9 +77,7 @@ class VideoProcessingService : Service() {
         joins: Int,
         repeats: Int,
         includeAudio: Boolean,
-        audioBoost: Double,
-        intelliEnabled: Boolean,
-        finalMatchEnabled: Boolean
+        audioBoost: Double
     ) {
         if (_isRunning.value) return
 
@@ -126,9 +120,7 @@ class VideoProcessingService : Service() {
                     joins = joins,
                     includeAudio = includeAudio,
                     audioBoost = audioBoost,
-                    repeats = repeats,
-                    intelliEnabled = intelliEnabled,
-                    finalMatchEnabled = finalMatchEnabled
+                    repeats = repeats
                 ) { value, label, message ->
                     val elapsed = System.currentTimeMillis() - startTime
                     val etaSec = calculateEtaSeconds(elapsed, value)
@@ -286,8 +278,6 @@ class VideoProcessingService : Service() {
         const val EXTRA_REPEATS = "extra_repeats"
         const val EXTRA_INCLUDE_AUDIO = "extra_include_audio"
         const val EXTRA_AUDIO_BOOST = "extra_audio_boost"
-        const val EXTRA_INTELLI_ENABLED = "extra_intelli_enabled"
-        const val EXTRA_FINAL_MATCH_ENABLED = "extra_final_match_enabled"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -322,9 +312,7 @@ class VideoProcessingService : Service() {
             joins: Int,
             repeats: Int,
             includeAudio: Boolean,
-            audioBoost: Double,
-            intelliEnabled: Boolean,
-            finalMatchEnabled: Boolean
+            audioBoost: Double
         ) {
             val intent = Intent(context, VideoProcessingService::class.java).apply {
                 action = ACTION_START
@@ -335,8 +323,6 @@ class VideoProcessingService : Service() {
                 putExtra(EXTRA_REPEATS, repeats)
                 putExtra(EXTRA_INCLUDE_AUDIO, includeAudio)
                 putExtra(EXTRA_AUDIO_BOOST, audioBoost)
-                putExtra(EXTRA_INTELLI_ENABLED, intelliEnabled)
-                putExtra(EXTRA_FINAL_MATCH_ENABLED, finalMatchEnabled)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
