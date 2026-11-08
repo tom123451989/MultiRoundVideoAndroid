@@ -688,8 +688,13 @@ private suspend fun detectEncoderPlan(): EncoderPlan {
         if (hasOpenH264) add("libopenh264")
     }
     return when {
-        hasHardwareH264 -> EncoderPlan("h264_mediacodec", softwareFallbacks)
-        hasMpeg4 -> EncoderPlan("mpeg4", softwareFallbacks.filterNot { it == "mpeg4" })
+        hasMpeg4 -> EncoderPlan("mpeg4", buildList {
+            if (hasHardwareH264) add("h264_mediacodec")
+            if (hasOpenH264) add("libopenh264")
+        })
+        hasHardwareH264 -> EncoderPlan("h264_mediacodec", buildList {
+            if (hasOpenH264) add("libopenh264")
+        })
         hasOpenH264 -> EncoderPlan("libopenh264", emptyList())
         else -> throw IOException("This FFmpeg build exposes no supported MP4 video encoder.")
     }
